@@ -1,4 +1,7 @@
 #pragma once
+#ifdef KS_INTEGRATION
+#include "binary_hard.h"
+#endif
 
 
 template <class Tpsys>
@@ -116,13 +119,28 @@ PS::S32 collisionDetermination(Tpsys & pp,
     PS::S32 psize = pp.size();
     for(PS::S32 i=0; i<psize; i++){
         if ( pp[i].isDead ) continue;
+#ifdef MERGE_BINARY
         for(PS::S32 j=0; j<psize; j++){
+#else
+        // The first visit to each unordered pair in the legacy traversal has
+        // i < j. Keep that order so equal-distance and equal-mass ties agree.
+        for(PS::S32 j=i+1; j<psize; j++){
+#endif
             //PS::S32 pj_id = pp[i].n_hard_list.at(j);
             if ( i == j || pp[j].isDead ) continue;
             PS::F64vec dr = pp[i].xp - pp[j].xp;
             //PS::F64vec dv = pp[i].vp - pp[j].vp;
-            PS::F64 r1 = sqrt(dr*dr);
+            const PS::F64 distance2 = dr*dr;
             PS::F64 r2 = pp[i].f*pp[i].r_planet + pp[j].f*pp[j].r_planet;
+#ifndef MERGE_BINARY
+            const PS::F64 contact2 = r2*r2;
+            // Reject only clearly separated pairs. Keep the legacy sqrt and
+            // division for near-contact/tie cases and exceptional radii.
+            if (r2 > 0 && contact2 >= std::numeric_limits<PS::F64>::min()
+                && std::isfinite(contact2)
+                && distance2 > contact2*(1+8*std::numeric_limits<PS::F64>::epsilon())) continue;
+#endif
+            PS::F64 r1 = sqrt(distance2);
             PS::F64 R = r1 / r2;
             if ( R < R_min ){
                 //if ( ( col_pair == std::make_pair(i, j) || col_pair == std::make_pair(j, i) )
@@ -229,8 +247,13 @@ void timeIntegrate_multi(Tpsys & pp,
                          PS::S32 & n_frag,
                          PS::F64 & edisp,
                          PS::F64 & edisp_d,
-                         std::vector<Collision> & collision_list)
+                         std::vector<Collision> & collision_list,
+                         const bool allow_binary = true)
 {
+#ifdef KS_INTEGRATION
+    BinaryWorkAdmission binary_admission;
+    BinaryFallbackTimer binary_fallback_timer(false);
+#endif
     using iterator = std::multimap<PS::S32,PS::S32>::iterator;
     std::vector<PS::S32> active_list;
     std::pair<PS::S32,PS::S32> col_pair;
@@ -270,6 +293,11 @@ void timeIntegrate_multi(Tpsys & pp,
     }
     
     while ( time < time_end ) {
+#ifdef KS_INTEGRATION
+        if (tryBinaryHardRescan(pp, allow_binary, n_col, loop,
+            active_list.size() == pp.size(), time, time_end,
+            binary_admission, binary_fallback_timer)) return;
+#endif
         
         time_s = makeActiveList(pp, active_list);
         
@@ -486,8 +514,13 @@ void timeIntegrate_multi_omp(Tpsys & pp,
                              PS::S32 & n_frag,
                              PS::F64 & edisp,
                              PS::F64 & edisp_d,
-                             std::vector<Collision> & collision_list)
+                             std::vector<Collision> & collision_list,
+                         const bool allow_binary = true)
 {
+#ifdef KS_INTEGRATION
+    BinaryWorkAdmission binary_admission;
+    BinaryFallbackTimer binary_fallback_timer(false);
+#endif
     using iterator = std::multimap<PS::S32,PS::S32>::iterator;
     std::vector<PS::S32> active_list;
     std::pair<PS::S32,PS::S32> col_pair;
@@ -527,6 +560,11 @@ void timeIntegrate_multi_omp(Tpsys & pp,
     }
     
     while ( time < time_end ) {
+#ifdef KS_INTEGRATION
+        if (tryBinaryHardRescan(pp, allow_binary, n_col, loop,
+            active_list.size() == pp.size(), time, time_end,
+            binary_admission, binary_fallback_timer)) return;
+#endif
         
         time_s = makeActiveList(pp, active_list);
 

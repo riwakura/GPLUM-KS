@@ -375,6 +375,23 @@ int main(int argc, char *argv[])
     //////////////////
     /*  File Open   */
     //////////////////
+#ifdef KS_INTEGRATION
+    // Each rank owns a file; OpenMP updates are aggregated under a mutex.
+    std::ofstream fout_binary;
+    char binary_profile_path[512];
+    sprintf(binary_profile_path, "%s/binary_profile_rank%06d.csv", dir_name, PS::Comm::getRank());
+    PS::F64 previous_binary_time = std::numeric_limits<PS::F64>::quiet_NaN();
+    if (FP_t::ks_profile) {
+        std::ifstream existing_binary_profile(binary_profile_path);
+        const bool append_binary_profile = time_sys != 0.
+            && existing_binary_profile.peek() != std::ifstream::traits_type::eof();
+        existing_binary_profile.close();
+        fout_binary.open(binary_profile_path, time_sys == 0. ? std::ios::out : std::ios::app);
+        if (append_binary_profile) previous_binary_time = time_sys;
+        else writeBinaryProfile(fout_binary, time_sys, true);
+    }
+    BinaryProfileOutput binary_profile_output(fout_binary, previous_binary_time);
+#endif
     std::ofstream fout_eng;
     std::ofstream fout_col;
     std::ofstream fout_rem;
@@ -402,7 +419,8 @@ int main(int argc, char *argv[])
     /*  Preparation Before Loop   */
     ////////////////////////////////
     e_now.calcEnergy(system_grav);
-    if ( !param.bHeader ) e_init = e_now;
+    // Binary restarts already carry the original energy reference.
+    if ( !param.bHeader && !param.bRestart ) e_init = e_now;
     PS::F64 de =  e_now.calcEnergyError(e_init);
     
     Wtime wtime;
@@ -522,6 +540,9 @@ int main(int argc, char *argv[])
         system_hard.clear();
         system_hard.reserve_hard(2 * (n_with_ngb + system_ex.getNumberOfParticleRecv()));
         n_in = system_hard.makeList(system_grav, system_ex);
+#ifdef BINARY_ENCOUNTER_TRACE
+        std::cerr << "BINARY_HARD_STEP," << istep << ',' << time_sys << std::endl;
+#endif
         n_out = system_hard.timeIntegrate(system_grav, system_ex,
                                           NList.n_list, istep);
         //system_hard.showParticleID();
@@ -739,6 +760,10 @@ int main(int argc, char *argv[])
             //PRC(ephi); PRC(ephi_s); PRL(ephi_d);
         }
                 
+#ifdef KS_INTEGRATION
+        if (FP_t::ks_profile && (time_sys == param.dt_snap*isnap || time_sys >= param.t_end))
+            binary_profile_output.write(time_sys);
+#endif
         if( time_sys  == param.dt_snap*isnap ){
             outputStep(system_grav, time_sys, e_init, e_now, de,
                        n_col_tot, n_frag_tot, dir_name, isnap, id_next, fout_eng,
@@ -773,6 +798,9 @@ int main(int argc, char *argv[])
     ///   Loop End
     ////////////////////
 
+#ifdef KS_INTEGRATION
+    if (FP_t::ks_profile) binary_profile_output.write(time_sys);
+#endif
     if ( PS::Comm::getRank() == 0 ) {
         fout_eng.close();
         fout_col.close();

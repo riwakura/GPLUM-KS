@@ -5,8 +5,8 @@ INC = -I$(PS_PATH_FDPS) -I$(PS_PATH_PIKG)inc
 ####################
 ###   Compiler   ###
 ####################
-CC = clang++ -std=c++14
-#CC = mpic++ -std=c++14
+CC = clang++ -std=c++17
+#CC = mpic++ -std=c++17
 #CC = time FCCpx -Nclang
 #CC = time mpiFCCpx -Nclang
 
@@ -35,9 +35,14 @@ quadrupole = yes
 #absorb_particle = yes
 #test_particle = yes
 
+# Use Mikkola & Aarseth (1998)'s prescription for integration of binary
+use_KS = yes
+# Central-star tides only in the relative motion (requires use_KS=yes).
+#ks_solar_only = yes
+
 collision = yes
 #Kominami = yes
-#Chembers = yes
+#Chambers = yes
 #Shibata = yes
 #merge_binary = yes
 
@@ -157,6 +162,16 @@ ifeq ($(use_PIKG),yes)
 CFLAGS += -DUSE_PIKG
 endif
 
+####################
+###      KS      ###
+####################
+ifeq ($(use_KS),yes)
+CFLAGS += -DKS_INTEGRATION
+ifeq ($(ks_solar_only),yes)
+CFLAGS += -DKS_SOLAR_ONLY
+endif
+endif
+
 CFLAGS += -DMONAR
 #CFLAGS += -g
 
@@ -165,11 +180,16 @@ ifeq ($(use_PIKG),yes)
 SRC += gravity_kernel_epep.hpp gravity_kernel_epsp.hpp
 endif
 PROGRAM = gplum.out
-HEADER = mathfunc.h kepler.h energy.h particle.h disk.h gravity.h gravity_kernel.hpp collisionA.h collisionB.h hermite.h hard.h read.h time.h func.h
+HEADER = ks.h binary.h ks_integrator.h binary_hard.h binary_profile.h mathfunc.h kepler.h energy.h particle.h disk.h gravity.h gravity_kernel.hpp collisionA.h collisionB.h hermite.h hard.h read.h time.h func.h
 
 
-$(PROGRAM): $(SRC)
-	$(CC) -MMD $(INC) $(CFLAGS) -o $@ $(SRC)
+$(PROGRAM): $(SRC) ks.h binary.h ks_integrator.h binary_hard.h binary_profile.h FORCE
+	@printf '%s\n' '$(CC) $(INC) $(CFLAGS)' > .build_flags.tmp
+	@if test ! -e $@ || ! cmp -s .build_flags.tmp .build_flags || test -n "$(filter-out FORCE,$?)"; then \
+	    $(CC) -MMD $(INC) $(CFLAGS) -o $@ $(SRC) && mv .build_flags.tmp .build_flags; \
+	else \
+	    rm -f .build_flags.tmp; \
+	fi
 
 gravity_kernel_epep.hpp: gravity_kernel_epep.pikg
 	./removeif.sh gravity_kernel_epep.pikg gravity_kernel_epep_noif.pikg $(CFLAGS)
@@ -182,8 +202,12 @@ gravity_kernel_epsp.hpp: gravity_kernel_epsp.pikg
 	sed -i -e 's/__DOT__/./g' gravity_kernel_epsp.hpp
 
 
-all: clean $(PROGRAM)
+all: $(PROGRAM)
 
 clean:
-	rm -f *.out *.o *.d *~
+	rm -f *.out *.o *.d *~ .build_flags .build_flags.tmp
 	rm -f gravity_kernel_*.hpp* gravity_kernel_*_noif.pikg*
+
+# Rebuild when compiler, include paths or options change, even without source edits.
+.PHONY: all clean FORCE
+-include $(PROGRAM:.out=.d)

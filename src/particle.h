@@ -419,6 +419,10 @@ public:
     PS::F64 phi_d;     // potential(hard)
     PS::F64 phi_s;     // potential by sun
     static PS::F64 m_sun;
+    static PS::F64 binary_hill_factor;
+    static PS::F64 binary_max_perturbation;
+    static PS::S32 ks_profile;
+
     static PS::F64 dens;
 
     static PS::F64 eps2;
@@ -499,6 +503,9 @@ public:
 
     static void readParameter(std::string name,
                               std::string value){
+        if ( name == "ks_profile" ) ks_profile = std::atoi(value.c_str()) > 0;
+        if ( name == "binary_hill_factor" ) binary_hill_factor = getvalue(value, 1., 1.);
+        if ( name == "binary_max_perturbation" ) binary_max_perturbation = getvalue(value, 1., 1.);
         if ( name == "dt_tree" ) dt_tree = getvalue(value, T_MKS, T_CGS);
         if ( name == "dt_min" ) dt_min = getvalue(value, T_MKS, T_CGS);
         if ( name == "eta" ) eta = getvalue(value, 1., 1.);
@@ -541,6 +548,9 @@ public:
         if ( name == "f" ) increase_factor = getvalue(value, 1., 1.);
     }
     static void broadcastParameter(){
+        PS::Comm::broadcast(&ks_profile, 1);
+        PS::Comm::broadcast(&binary_hill_factor, 1);
+        PS::Comm::broadcast(&binary_max_perturbation, 1);
         PS::F64 param[20] = {dt_tree, dt_min, eta, eta_0, eta_sun, eta_sun0, alpha2, m_sun,
             dens, eps2, eps2_sun, R_cut0, R_cut1, R_search0, R_search1, gamma,
             r_cut_min, r_cut_max, p_cut, increase_factor};
@@ -579,6 +589,9 @@ public:
 #endif
     }
     static void showParameter(std::ostream & fout = std::cout) {
+        fout << "ks_profile = " << ks_profile << "\n";
+        fout << "binary_hill_factor = " << binary_hill_factor << "\n"
+             << "binary_max_perturbation = " << binary_max_perturbation << "\n";
         fout << std::fixed << std::setprecision(5)
              << "dt_tree       = " << dt_tree << "\t(2^" << (PS::S32)std::log2(dt_tree) << ", " << dt_tree/(2.*MY_PI) << " year)" << std::endl
              << "dt_min        = " << dt_min << "\t(2^" << (PS::S32)std::log2(dt_min) << ", " << dt_min/(2.*MY_PI) << " year)" << std::endl
@@ -915,6 +928,9 @@ public:
 };
 
 PS::F64 FPGrav::m_sun     = 1.;
+PS::F64 FPGrav::binary_hill_factor = 1.;
+PS::F64 FPGrav::binary_max_perturbation = 0.01;
+PS::S32 FPGrav::ks_profile = 0;
 PS::F64 FPGrav::dens      = 5.049667e6;
 
 PS::F64 FPGrav::eps2     = 0.;
@@ -1043,6 +1059,7 @@ public:
     //    neighbor = n_hard_list.size();
     //}
     FPHard(){
+        acc0 = 0.;
         x0   = v0   = 0.;
         a0_s = j0_s = 0.;
         a0_d = j0_d = 0.;
@@ -1735,4 +1752,3 @@ public:
     }
 #endif
 };
-

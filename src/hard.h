@@ -1,4 +1,9 @@
 #pragma once
+#ifdef KS_DETECTION
+#include "binary.h"
+#include <iomanip>
+#include <ostream>
+#endif
 
 //#ifdef PARTICLE_SIMULATOR_THREAD_PARALLEL
 #include "samplesortlib.hpp"
@@ -86,6 +91,57 @@ public:
     ClusterSystem ptcl_multi;
     std::map<PS::S32,PS::S32> mp_cluster;  // cluster ID -> cluster adress in HardSystem
 
+#ifdef KS_DETECTION
+    // Start-of-hard-step diagnostic snapshots, local to the owning MPI rank.
+    // Cleared each tree step; not persistent KS groups or integration states.
+    struct BinaryDiagnostic : public BinaryInfo {
+        PS::F64 time = 0;
+        std::size_t cluster_index = 0, cluster_size = 0;
+    };
+    std::vector<BinaryDiagnostic> binary_candidates;
+    void writeBinaryCandidates(std::ostream& out) const {
+        const auto precision = out.precision();
+        out << std::setprecision(17);
+        out << "time,cluster_index,cluster_size,id1,id2,separation,hill_radius,specific_energy,semi,ecc,peri,apo,period\n";
+        for (const auto& c : binary_candidates)
+            out << c.time << ',' << c.cluster_index << ',' << c.cluster_size << ','
+                << c.id1 << ',' << c.id2 << ',' << c.separation << ',' << c.hill_radius << ','
+                << c.specific_energy << ',' << c.semi << ',' << c.ecc << ','
+                << c.peri << ',' << c.apo << ',' << c.period << '\n';
+        out.precision(precision);
+    }
+    template<class Tpsys, class Tpsys2>
+    void detectBinaryCandidates(Tpsys& pp, Tpsys2& ex_pp, PS::F64 time) {
+        binary_candidates.clear();
+#ifndef WITHOUT_SUN
+        BinarySearchParameters parameters;
+        parameters.hill_factor = FP_t::binary_hill_factor;
+        for (std::size_t i = 0; i < list_multi.size(); ++i) {
+            class ClusterParticles {
+            public:
+                Tpsys& local;
+                Tpsys2& external;
+                const std::vector<std::pair<bool, PS::S32>>& addresses;
+
+                std::size_t size() const { return addresses.size(); }
+                const FP_t& operator[](std::size_t j) const {
+                    const auto& address = addresses[j];
+                    return address.first ? local[address.second] : external[address.second];
+                }
+            };
+            const ClusterParticles particles{pp, ex_pp, list_multi[i]};
+            for (const auto& candidate : detectBinaries(particles, parameters)) {
+                BinaryDiagnostic diagnostic;
+                static_cast<BinaryInfo&>(diagnostic) = candidate;
+                diagnostic.time = time;
+                diagnostic.cluster_index = i;
+                diagnostic.cluster_size = list_multi[i].size();
+                binary_candidates.push_back(diagnostic);
+            }
+        }
+#endif
+    }
+#endif
     std::vector<Collision> collision_list;
     std::vector<std::pair<PS::S32,PS::S32> > frag_list;
 
@@ -143,8 +199,11 @@ public:
     PS::S32 getNumberOfParticleInLargestClusterLocal(){
         PS::S32 n = 0;
         PS::S32 size = ptcl_multi.size();
-        for ( PS::S32 i=0; i<size; i++ )
-            if ( n < size ) n = ptcl_multi[i].size();
+        for ( PS::S32 i=0; i<size; i++ ) {
+            if ( n < ptcl_multi[i].size() ) {
+                n = ptcl_multi[i].size();
+            }
+        }
         return n;
     }
     PS::S32 getNumberOfParticleInLargestClusterGlobal() {
@@ -231,6 +290,9 @@ public:
         ptcl_multi.clear();
         mp_cluster.clear();
         collision_list.clear();
+#ifdef KS_DETECTION
+        binary_candidates.clear();
+#endif
         frag_list.clear();
 
         n_col = n_frag = 0;

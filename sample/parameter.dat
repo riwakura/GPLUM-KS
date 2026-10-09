@@ -92,3 +92,6 @@ eps_t           = 1.                    # tangential coefficient of restitution
 
 
 
+
+# KS DIAGNOSTICS
+ks_profile      = 0                     # 1: collect KS statistics and write per-rank CSV logs
